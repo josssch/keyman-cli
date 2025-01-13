@@ -117,7 +117,17 @@ impl KeyManCli {
                 }
             },
 
-            Command::RenameKey { name, new_name } => todo!(),
+            Command::RenameKey { name, new_name } => match store.rename_key(name, new_name) {
+                Some(key) => {
+                    println!("Renamed key: {} -> {}", name, key.name);
+                    store.save().unwrap();
+                }
+
+                None => {
+                    println!("Key not found: {}", name);
+                }
+            },
+
             Command::InfoKey { name } => todo!(),
         }
     }

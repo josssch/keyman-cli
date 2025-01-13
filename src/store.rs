@@ -40,6 +40,9 @@ pub struct SshKeyStorage {
     #[serde(default = "serde_default_file_name", skip)]
     pub file_name: String,
 
+    #[serde(default, skip)]
+    marked_for_deletion: Vec<Key>,
+
     active_key_name: Option<String>,
     keys_by_name: HashMap<String, Key>,
 }
@@ -54,6 +57,7 @@ impl Default for SshKeyStorage {
             active_key_name: None,
             file_name: DEFAULT_JSON_FILE.to_string(),
             keys_by_name: HashMap::new(),
+            marked_for_deletion: Vec::new(),
         }
     }
 }
@@ -140,7 +144,7 @@ impl SshKeyStorage {
         self.keys_by_name.get(&key_name)
     }
 
-    pub fn remove_key(&mut self, name: &str) -> Option<Key> {
+    pub fn remove_key(&mut self, name: &str) -> Option<&Key> {
         let key = match self.keys_by_name.remove(name) {
             Some(key) => key,
             None => return None,
@@ -154,12 +158,29 @@ impl SshKeyStorage {
             self.active_key_name = None;
         }
 
-        key.delete();
-
-        Some(key)
+        self.marked_for_deletion.push(key);
+        self.marked_for_deletion.last()
     }
 
-    pub fn save(&self) -> Result<PathBuf, Box<dyn Error>> {
+    pub fn rename_key(&mut self, name: &str, new_name: &str) -> Option<&Key> {
+        if !self.keys_by_name.contains_key(name) {
+            return None;
+        }
+
+        let mut key = self.keys_by_name.remove(name).unwrap();
+
+        let new_name = new_name.to_string();
+        key.name = new_name.clone();
+
+        if self.active_key_name.as_ref().is_some_and(|n| n == name) {
+            self.active_key_name = Some(new_name.clone());
+        }
+
+        self.keys_by_name.insert(new_name.clone(), key);
+        self.keys_by_name.get(&new_name)
+    }
+
+    pub fn save(&mut self) -> Result<PathBuf, Box<dyn Error>> {
         create_folders()?;
 
         let folder = get_folder();
@@ -172,6 +193,12 @@ impl SshKeyStorage {
         for key in self.keys_by_name.values() {
             key.save()?;
         }
+
+        for key in &self.marked_for_deletion {
+            key.delete()?;
+        }
+
+        self.marked_for_deletion.clear();
 
         Ok(output_path)
     }
@@ -204,9 +231,16 @@ impl Key {
         Ok(())
     }
 
-    pub fn delete(&self) {
-        self.private_key_path.as_ref().map(|p| fs::remove_file(p));
-        self.public_key_path.as_ref().map(|p| fs::remove_file(p));
+    pub fn delete(&self) -> Result<(), io::Error> {
+        if let Some(path) = self.private_key_path.as_ref() {
+            fs::remove_file(path)?;
+        }
+
+        if let Some(path) = self.public_key_path.as_ref() {
+            fs::remove_file(path)?;
+        }
+
+        Ok(())
     }
 
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
