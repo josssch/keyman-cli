@@ -6,9 +6,8 @@ I am aware projects like this exist, but I wanted to create my own version as a 
 
 ## Todo
 
-- [ ] Finish subcommands
-- [ ] Add more options
-- [ ] Improve output formatting and styling
-- [ ] Installation docs, usage, etc.
 - [ ] Ensure all errors are handled
+    - [ ] Organize subcommands into their own functions
+- [ ] Add more options
+- [ ] Installation docs, usage, etc.
 - [ ] Add CI/CD via GitHub Actions
