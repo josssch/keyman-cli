@@ -73,6 +73,7 @@ impl SshKeyStorage {
         serde_json::from_reader(file).ok()
     }
 
+    #[allow(unused)]
     pub fn new() -> Self {
         Default::default()
     }
@@ -101,13 +102,12 @@ impl SshKeyStorage {
         self.keys_by_name.get(name)
     }
 
-    pub fn use_key(&mut self, name: Option<&str>) -> Result<Option<&Key>, io::Error> {
-        if name.is_none_or(|n| !self.keys_by_name.contains_key(n)) {
-            self.active_key_name = None;
+    pub fn use_key(&mut self, name: &str) -> Result<Option<&Key>, io::Error> {
+        if !self.keys_by_name.contains_key(name) {
             return Ok(None);
         }
 
-        self.active_key_name = name.map(ToString::to_string);
+        self.active_key_name = Some(name.to_string());
 
         let active_key = self
             .get_active_key()
@@ -118,9 +118,13 @@ impl SshKeyStorage {
         Ok(Some(active_key))
     }
 
-    pub fn add_key(&mut self, path_to_key: PathBuf, name: Option<&str>) -> Option<&Key> {
-        if path_to_key.is_dir() {
-            return None;
+    pub fn add_key(
+        &mut self,
+        path_to_key: PathBuf,
+        name: Option<&str>,
+    ) -> Result<&Key, Box<dyn Error>> {
+        if !path_to_key.is_file() {
+            return Err("invalid path to private key".into());
         }
 
         let key_name = name.map_or(
@@ -132,6 +136,10 @@ impl SshKeyStorage {
             ToString::to_string,
         );
 
+        if self.keys_by_name.contains_key(&key_name) {
+            return Err("key with that name already exists".into());
+        }
+
         let store_path = get_keys_folder().join(&key_name).with_extension("");
         let key = Key {
             original_path: Some(path_to_key),
@@ -141,7 +149,11 @@ impl SshKeyStorage {
         };
 
         self.keys_by_name.insert(key_name.clone(), key);
-        self.keys_by_name.get(&key_name)
+
+        Ok(self
+            .keys_by_name
+            .get(&key_name)
+            .expect("key was just added"))
     }
 
     pub fn remove_key(&mut self, name: &str) -> Option<&Key> {
@@ -269,3 +281,5 @@ impl Key {
         Ok(())
     }
 }
+
+// todo: impl Display for Key
