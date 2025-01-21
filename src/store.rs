@@ -1,6 +1,7 @@
 use std::{collections::HashMap, error::Error, fs, io, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
+use ssh_key::PrivateKey;
 
 use crate::platform;
 
@@ -140,11 +141,20 @@ impl SshKeyStorage {
             return Err("key with that name already exists".into());
         }
 
+        let private_key_contents = fs::read_to_string(&path_to_key)?;
+
+        let private_key = PrivateKey::from_openssh(&private_key_contents)?;
+        let public_key = private_key.public_key();
+
         let store_path = get_keys_folder().join(&key_name).with_extension("");
+        let public_key_path = store_path.with_extension("pub");
+
+        public_key.write_openssh_file(&public_key_path)?;
+
         let key = Key {
             original_path: Some(path_to_key),
             private_key_path: Some(store_path),
-            public_key_path: None,
+            public_key_path: Some(public_key_path),
             name: key_name.clone(),
         };
 
@@ -231,14 +241,16 @@ pub struct Key {
 
 impl Key {
     pub fn link(&self) -> Result<(), io::Error> {
-        if self.private_key_path.as_ref().is_none() {
-            return Ok(()); // nothing to link
-        }
-
         let ssh_path = platform::get_ssh_path();
         let key_link_to = ssh_path.join(DEFAULT_SSH_KEY_NAME);
 
-        platform::soft_link(self.private_key_path.as_ref().unwrap(), &key_link_to)?;
+        if let Some(ref path) = self.private_key_path {
+            platform::soft_link(path, &key_link_to)?;
+        }
+
+        if let Some(ref path) = self.public_key_path {
+            platform::soft_link(path, &key_link_to.with_extension("pub"))?;
+        }
 
         Ok(())
     }
