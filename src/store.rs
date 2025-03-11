@@ -1,4 +1,4 @@
-use std::{cell::Cell, collections::HashMap, error::Error, fs, io, path::PathBuf};
+use std::{cell::Cell, collections::HashMap, error::Error, fmt::Display, fs, io, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -259,6 +259,10 @@ impl Key {
         PrivateKey::try_from(private_key_contents.as_str())
     }
 
+    pub fn fingerprint(&self) -> Option<String> {
+        Some(self.private_key().ok()?.fingerprint().to_string())
+    }
+
     pub fn link(&self) -> Result<(), io::Error> {
         let ssh_folder = platform::get_ssh_path();
 
@@ -307,4 +311,16 @@ impl Key {
     }
 }
 
-// todo: impl Display for Key
+impl Display for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            self.name,
+            self.fingerprint()
+                // add a prefixing space if it's not empty
+                .map(|f| format!(" {f}"))
+                .unwrap_or_default()
+        )
+    }
+}

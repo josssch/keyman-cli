@@ -6,6 +6,16 @@ use crate::{error::CliError, store::SshKeyStorage};
 
 pub const BIN_NAME: &str = env!("CARGO_BIN_NAME");
 
+#[allow(unused)]
+pub enum ExitCode {
+    Ok = 0,
+    MiscError,
+
+    // number selected based on my own `man sysexits`
+    IncorrectUsage = 64,
+    InputDataError,
+}
+
 #[derive(Debug, Clone, Parser)]
 #[command(
     name = "keyman",
@@ -93,7 +103,7 @@ pub enum Command {
     List, // todo: options for output formatting
 }
 
-pub type SubcommandResult = Result<(), CliError>;
+pub type SubcommandResult = Result<ExitCode, CliError>;
 
 impl KeyManCli {
     pub fn usage_msg_from(&self, args: &[&str]) -> String {
@@ -123,7 +133,7 @@ impl KeyManCli {
         }
 
         store.save().map_err(CliError::SaveFailed)?;
-        Ok(())
+        Ok(ExitCode::Ok)
     }
 
     pub fn handle_rename(&self, args: &RenameArgs, store: &mut SshKeyStorage) -> SubcommandResult {
@@ -134,21 +144,26 @@ impl KeyManCli {
         println!("Renamed from '{}' -> '{}'", &args.key_name, key.name);
         store.save().map_err(CliError::SaveFailed)?;
 
-        Ok(())
+        Ok(ExitCode::Ok)
     }
 
     pub fn handle_list(&self, store: &SshKeyStorage) -> SubcommandResult {
         let current_key_name = store.get_active_key().map(|k| k.name.as_str());
 
-        println!("Your SSH keys:");
-
-        for &key in store.get_keys().iter() {
-            let in_use = Some(key.name.as_str()) == current_key_name;
-
-            println!("  - {}{}", key.name, if in_use { " (in use)" } else { "" });
+        let keys = store.get_keys();
+        if keys.is_empty() {
+            eprintln!("You have no SSH keys");
+            return Ok(ExitCode::MiscError);
         }
 
-        Ok(())
+        println!("Your SSH keys:");
+
+        for &key in keys.iter() {
+            let in_use = Some(key.name.as_str()) == current_key_name;
+            println!("  - {key:#}{}", if in_use { " (in use)" } else { "" });
+        }
+
+        Ok(ExitCode::Ok)
     }
 
     pub fn handle_use(&self, key_name: &str, store: &mut SshKeyStorage) -> SubcommandResult {
@@ -160,7 +175,7 @@ impl KeyManCli {
                 );
 
                 store.save().map_err(CliError::SaveFailed)?;
-                Ok(())
+                Ok(ExitCode::Ok)
             }
 
             Ok(None) => Err(CliError::KeyNotFound(key_name.to_string())),
@@ -176,10 +191,15 @@ impl KeyManCli {
         match (key_name, key) {
             (_, Some(key)) => {
                 println!("Viewing Key '{}':", &key.name);
+
+                if let Ok(fingerprint) = key.private_key().map(|key| key.fingerprint()) {
+                    println!("  Fingerprint: {fingerprint:#}");
+                }
+
                 println!("  Private Key: {}", key.private_key_path.to_string_lossy());
                 println!("  Public Key: {}", key.public_key_path.to_string_lossy());
 
-                Ok(())
+                Ok(ExitCode::Ok)
             }
 
             (Some(key_name), None) => Err(CliError::KeyNotFound(key_name.to_string())),
@@ -191,7 +211,7 @@ impl KeyManCli {
                     .print_help()
                     .expect("failed to print help");
 
-                Ok(())
+                Ok(ExitCode::IncorrectUsage)
             }
         }
     }
@@ -215,7 +235,7 @@ impl KeyManCli {
 
                 println!("Successfully removed key '{}'", &args.key_name);
 
-                Ok(())
+                Ok(ExitCode::Ok)
             }
 
             None => Err(CliError::KeyNotFound(args.key_name.clone())),
@@ -249,10 +269,10 @@ impl KeyManCli {
         };
 
         match result {
-            Ok(_) => Ok(()),
+            Ok(exit_code) => std::process::exit(exit_code as i32),
             Err(err) => {
                 eprintln!("{}", err.to_string());
-                std::process::exit(1);
+                std::process::exit(ExitCode::MiscError as i32);
             }
         }
     }

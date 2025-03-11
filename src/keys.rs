@@ -1,17 +1,23 @@
-use ssh_key::{PrivateKey as OpenSshPrivateKey, PublicKey};
+use ssh_key::{Fingerprint, HashAlg, PrivateKey as OpenSshPrivateKey, PublicKey};
 
 use crate::error::CliError;
 
 pub const OPENSSH_HEADER: &str = "-----BEGIN OPENSSH PRIVATE KEY-----";
 
 pub enum PrivateKey {
-    Open(OpenSshPrivateKey),
+    OpenSsh(OpenSshPrivateKey),
 }
 
 impl PrivateKey {
+    pub fn fingerprint(&self) -> Fingerprint {
+        match *self {
+            PrivateKey::OpenSsh(ref key) => key.fingerprint(HashAlg::Sha256),
+        }
+    }
+
     pub fn public_key(&self) -> &PublicKey {
         match *self {
-            PrivateKey::Open(ref key) => key.public_key(),
+            PrivateKey::OpenSsh(ref key) => key.public_key(),
         }
     }
 }
@@ -28,7 +34,7 @@ impl TryFrom<&str> for PrivateKey {
                 let key = OpenSshPrivateKey::from_openssh(key)
                     .map_err(|_| CliError::UnsupportedKeyFormat)?;
 
-                Ok(PrivateKey::Open(key))
+                Ok(PrivateKey::OpenSsh(key))
             }
 
             _ => Err(CliError::UnsupportedKeyFormat),
