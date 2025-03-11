@@ -11,6 +11,9 @@ pub enum CliError {
     /// A custom message to display to the user under error conditions
     Message(String),
 
+    /// When the key format is not supported
+    UnsupportedKeyFormat,
+
     /// Any error that will be conveyed to the user via its ToString implementation
     Misc(Box<dyn Error>),
 }
@@ -36,6 +39,7 @@ impl ToString for CliError {
 
             CliError::SaveFailed(ref err) => format!("Failed to save changes: {err:#}"),
             CliError::Message(ref msg) => msg.clone(),
+            CliError::UnsupportedKeyFormat => "Unsupported key format".to_string(),
             CliError::Misc(ref err) => format!("An unknown error has occurred: {err:#}"),
         }
     }

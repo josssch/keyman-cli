@@ -176,14 +176,8 @@ impl KeyManCli {
         match (key_name, key) {
             (_, Some(key)) => {
                 println!("Viewing Key '{}':", &key.name);
-
-                if let Some(ref private_key_path) = key.private_key_path {
-                    println!("  Private Key: {}", private_key_path.to_string_lossy());
-                }
-
-                if let Some(ref public_key_path) = key.public_key_path {
-                    println!("  Public Key: {}", public_key_path.to_string_lossy());
-                }
+                println!("  Private Key: {}", key.private_key_path.to_string_lossy());
+                println!("  Public Key: {}", key.public_key_path.to_string_lossy());
 
                 Ok(())
             }

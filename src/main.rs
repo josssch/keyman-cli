@@ -5,6 +5,7 @@ mod cli;
 mod error;
 mod platform;
 mod store;
+mod keys;
 
 fn main() {
     let cli = KeyManCli::parse();

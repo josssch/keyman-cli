@@ -1,9 +1,12 @@
-use std::{collections::HashMap, error::Error, fs, io, path::PathBuf};
+use std::{cell::Cell, collections::HashMap, error::Error, fs, io, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
-use ssh_key::PrivateKey;
 
-use crate::platform;
+use crate::{
+    error::CliError,
+    keys::{decode_from_str, PrivateKey},
+    platform,
+};
 
 // todo: make configurable
 pub const DEFAULT_SSH_KEY_NAME: &str = "id_rsa";
@@ -11,7 +14,13 @@ pub const DEFAULT_SSH_KEY_NAME: &str = "id_rsa";
 pub const DEFAULT_JSON_FILE: &str = "keys.json";
 
 pub fn get_folder() -> PathBuf {
-    let mut home_folder = platform::get_home_folder();
+    // use the current working directory if not in debug mode
+    let mut home_folder = if cfg!(not(debug_assertions)) {
+        platform::get_home_folder()
+    } else {
+        PathBuf::new()
+    };
+
     home_folder.push(format!(".{}", env!("CARGO_PKG_NAME")));
 
     home_folder
@@ -141,23 +150,7 @@ impl SshKeyStorage {
             return Err("key with that name already exists".into());
         }
 
-        let private_key_contents = fs::read_to_string(&path_to_key)?;
-
-        let private_key = PrivateKey::from_openssh(&private_key_contents)?;
-        let public_key = private_key.public_key();
-
-        let store_path = get_keys_folder().join(&key_name).with_extension("");
-        let public_key_path = store_path.with_extension("pub");
-
-        public_key.write_openssh_file(&public_key_path)?;
-
-        let key = Key {
-            original_path: Some(path_to_key),
-            private_key_path: Some(store_path),
-            public_key_path: Some(public_key_path),
-            name: key_name.clone(),
-        };
-
+        let key = Key::new(&key_name, path_to_key);
         self.keys_by_name.insert(key_name.clone(), key);
 
         Ok(self
@@ -229,66 +222,91 @@ impl SshKeyStorage {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Key {
+    /// The name and identifier of this key
+    pub name: String,
+
     /// Path to the original key file that was provided via CLI
-    pub original_path: Option<PathBuf>,
+    pub original_private_key_path: PathBuf,
 
     /// Path to the private key file in storage
-    pub private_key_path: Option<PathBuf>,
-    pub public_key_path: Option<PathBuf>,
+    pub private_key_path: PathBuf,
 
-    pub name: String,
+    /// Path to the public key file in storage
+    pub public_key_path: PathBuf,
+
+    /// Whether the keys are saved on disk or not
+    #[serde(default)]
+    pub is_saved: Cell<bool>,
 }
 
 impl Key {
+    pub fn new(name: &str, private_key: PathBuf) -> Self {
+        let private_key_path = get_keys_folder().join(name).with_extension("");
+
+        Self {
+            name: name.to_string(),
+            original_private_key_path: private_key,
+            public_key_path: private_key_path.with_extension("pub"),
+            private_key_path,
+            is_saved: Cell::new(false),
+        }
+    }
+
+    pub fn private_key(&self) -> Result<PrivateKey, CliError> {
+        if !self.private_key_path.is_file() {
+            return Err("private key must be saved first".into());
+        }
+
+        let private_key_contents =
+            fs::read_to_string(&self.private_key_path).map_err(|e| CliError::Misc(Box::new(e)))?;
+
+        decode_from_str(&private_key_contents)
+    }
+
     pub fn link(&self) -> Result<(), io::Error> {
-        let ssh_path = platform::get_ssh_path();
-        let key_link_to = ssh_path.join(DEFAULT_SSH_KEY_NAME);
+        let ssh_folder = platform::get_ssh_path();
 
-        if let Some(ref path) = self.private_key_path {
-            platform::soft_link(path, &key_link_to)?;
-        }
+        let ssh_private_key = ssh_folder.join(DEFAULT_SSH_KEY_NAME);
+        let ssh_public_key = ssh_private_key.with_extension("pub");
 
-        if let Some(ref path) = self.public_key_path {
-            platform::soft_link(path, &key_link_to.with_extension("pub"))?;
-        }
+        platform::soft_link(&self.private_key_path, &ssh_private_key)?;
+        platform::soft_link(&self.public_key_path, &ssh_public_key)?;
 
         Ok(())
     }
 
     pub fn delete(&self) -> Result<(), io::Error> {
-        if let Some(path) = self.private_key_path.as_ref() {
-            fs::remove_file(path)?;
-        }
-
-        if let Some(path) = self.public_key_path.as_ref() {
-            fs::remove_file(path)?;
-        }
-
+        fs::remove_file(&self.private_key_path)?;
+        fs::remove_file(&self.public_key_path)?;
         Ok(())
     }
 
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
-        // if the private key already exists, we don't need to save it again
-        if self.private_key_path.as_ref().is_some_and(|p| p.exists()) {
-            return Ok(());
+        if !self.original_private_key_path.is_file() {
+            return Err("original private key path is not a file".into());
         }
 
-        // we can't copy to an empty path or if the original file doesn't exist
-        if self.private_key_path.is_none()
-            || self.original_path.as_ref().is_none_or(|p| !p.exists())
-        {
-            return Err("No private key path or the original file doesn't exist".into());
+        let parent_folder = self.private_key_path.parent();
+        if let Some(parent_folder) = parent_folder {
+            if !parent_folder.exists() {
+                fs::create_dir_all(parent_folder)?;
+            }
         }
 
-        let original_path = self.original_path.as_ref().unwrap();
-        let private_key_path = self.private_key_path.as_ref().unwrap();
+        if !self.is_saved.get() {
+            // must copy the original private key to the storage location
+            fs::copy(&self.original_private_key_path, &self.private_key_path)?;
 
-        let save_to_folder = private_key_path.parent();
-        if save_to_folder.as_ref().is_some_and(|p| !p.exists()) {
-            fs::create_dir_all(save_to_folder.unwrap())?;
+            let private_key = self
+                .private_key()
+                .map_err(|_| "failed to load private key")?;
+
+            let public_key = private_key.public_key();
+
+            public_key.write_openssh_file(&self.public_key_path)?;
+
+            self.is_saved.set(true);
         }
-
-        fs::copy(original_path, private_key_path)?;
 
         Ok(())
     }
