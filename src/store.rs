@@ -2,11 +2,7 @@ use std::{cell::Cell, collections::HashMap, error::Error, fs, io, path::PathBuf}
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    error::CliError,
-    keys::{decode_from_str, PrivateKey},
-    platform,
-};
+use crate::{error::CliError, keys::PrivateKey, platform};
 
 // todo: make configurable
 pub const DEFAULT_SSH_KEY_NAME: &str = "id_rsa";
@@ -260,7 +256,7 @@ impl Key {
         let private_key_contents =
             fs::read_to_string(&self.private_key_path).map_err(|e| CliError::Misc(Box::new(e)))?;
 
-        decode_from_str(&private_key_contents)
+        PrivateKey::try_from(private_key_contents.as_str())
     }
 
     pub fn link(&self) -> Result<(), io::Error> {

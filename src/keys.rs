@@ -2,7 +2,6 @@ use ssh_key::{PrivateKey as OpenSshPrivateKey, PublicKey};
 
 use crate::error::CliError;
 
-pub const RSA_HEADER: &str = "-----BEGIN RSA PRIVATE KEY-----";
 pub const OPENSSH_HEADER: &str = "-----BEGIN OPENSSH PRIVATE KEY-----";
 
 pub enum PrivateKey {
@@ -17,18 +16,22 @@ impl PrivateKey {
     }
 }
 
-pub fn decode_from_str(key: &str) -> Result<PrivateKey, CliError> {
-    let mut lines = key.trim().lines();
+impl TryFrom<&str> for PrivateKey {
+    type Error = CliError;
 
-    // todo: support more key formats
-    match lines.next() {
-        Some(OPENSSH_HEADER) => {
-            let key =
-                OpenSshPrivateKey::from_openssh(key).map_err(|_| CliError::UnsupportedKeyFormat)?;
+    fn try_from(key: &str) -> Result<Self, Self::Error> {
+        let mut lines = key.trim().lines();
 
-            Ok(PrivateKey::Open(key))
+        // todo: support more key formats
+        match lines.next() {
+            Some(OPENSSH_HEADER) => {
+                let key = OpenSshPrivateKey::from_openssh(key)
+                    .map_err(|_| CliError::UnsupportedKeyFormat)?;
+
+                Ok(PrivateKey::Open(key))
+            }
+
+            _ => Err(CliError::UnsupportedKeyFormat),
         }
-
-        _ => Err(CliError::UnsupportedKeyFormat),
     }
 }
