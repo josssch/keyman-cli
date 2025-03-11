@@ -231,7 +231,7 @@ pub struct Key {
     pub public_key_path: PathBuf,
 
     /// Whether the keys are saved on disk or not
-    #[serde(default)]
+    #[serde(skip)]
     pub is_saved: Cell<bool>,
 }
 
@@ -298,7 +298,6 @@ impl Key {
                 .map_err(|_| "failed to load private key")?;
 
             let public_key = private_key.public_key();
-
             public_key.write_openssh_file(&self.public_key_path)?;
 
             self.is_saved.set(true);
